@@ -9,6 +9,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///movies.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
+# Create tables if they don't exist
+with app.app_context():
+    db.create_all()
+
 
 
 
