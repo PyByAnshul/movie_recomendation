@@ -81,11 +81,9 @@ function select(element) {
                 let arr = JSON.parse(this.responseText)
 
                 for (var i = 0; i < arr.length; i++) {
-
                     var obj = arr[i];
-                    //console.log(obj[0],obj[1])
-                    displaymovies(obj[0], obj[1], obj[2])
-
+                    // Fetch poster asynchronously
+                    fetchPosterAndDisplay(obj.title, obj.overview, obj.movie_id, displaymovies);
                 }
             }
 
@@ -164,11 +162,9 @@ window.onload = function () {
             let arr = JSON.parse(this.responseText)
 
             for (var i = 0; i < arr.length; i++) {
-
                 var obj = arr[i];
-                //console.log(obj[0],obj[1])
-                displaytask(obj[0], obj[1], obj[2])
-
+                // Fetch poster asynchronously
+                fetchPosterAndDisplay(obj.title, obj.tags, obj.movie_id, displaytask);
             }
         }
 
@@ -187,20 +183,13 @@ window.onscroll = function (ev) {
         xhrr.open('get', '../movies_data', true)
         xhrr.setRequestHeader('Content-type', 'application/json')
         xhrr.onload = function () {
-
-
-
             let arr = JSON.parse(this.responseText)
 
             for (var i = 0; i < arr.length; i++) {
-
                 var obj = arr[i];
-                //console.log(obj[0],obj[1])
-                displaytask(obj[0], obj[1], obj[2])
-
+                // Fetch poster asynchronously
+                fetchPosterAndDisplay(obj.title, obj.tags, obj.movie_id, displaytask);
             }
-
-            //document.getElementById('prediction').innerHTML= this.responseText;
         }
         xhrr.send()
     }
@@ -288,4 +277,40 @@ function displaywrapper_movies() {
     container.insertAdjacentHTML("beforeend", q)
     // this function is use to element using id to element
 
+}
+
+// Function to fetch poster asynchronously
+function fetchPosterAndDisplay(title, description, movieId, displayFunction) {
+    // Show placeholder first
+    displayFunction(title, description, "https://via.placeholder.com/500x750?text=Loading...");
+    
+    // Fetch poster asynchronously
+    fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=a27a49bf043d4a93c59dccc8ffde1312&language=en-US`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.poster_path) {
+                const posterUrl = `https://image.tmdb.org/t/p/w500${data.poster_path}`;
+                // Update the image src
+                updateMovieImage(title, posterUrl);
+            }
+        })
+        .catch(error => {
+            console.log('Error fetching poster:', error);
+            updateMovieImage(title, "https://via.placeholder.com/500x750?text=No+Image");
+        });
+}
+
+// Function to update movie image after async fetch
+function updateMovieImage(title, imageUrl) {
+    // Find all images and update the one with matching title
+    const images = document.querySelectorAll('img');
+    images.forEach(img => {
+        const container = img.closest('.card_container, .main_container');
+        if (container) {
+            const titleElement = container.querySelector('.card__title, .title');
+            if (titleElement && titleElement.textContent.trim() === title) {
+                img.src = imageUrl;
+            }
+        }
+    });
 }

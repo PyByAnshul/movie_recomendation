@@ -1,12 +1,13 @@
-from flask import Flask,render_template,request,jsonify
-
+from flask import Flask, render_template, request, jsonify
 import requests
-import pandas as pd
 import data as dt
-
-
+from models import db
+from database_service import DatabaseService
 
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///movies.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
 
 
 
@@ -14,59 +15,61 @@ app = Flask(__name__)
 
 
 def fetch_overview(movie_id):
-    
-   movies_overview = pd.read_csv('pkl/movie_overview.csv')
-   movies_overview.drop('Unnamed: 0',axis=1,inplace=True)
-   
-   try:
+    return DatabaseService.get_movie_overview(movie_id)
 
-    z= movies_overview[movies_overview['id']==movie_id].overview.values
-    z=z[0]
-   
-   except:
-    z="nothing"
-
-   return z
-
-def fetch_poster(movie_id):
-    url = "https://api.themoviedb.org/3/movie/{}?api_key=a27a49bf043d4a93c59dccc8ffde1312&language=en-US".format(movie_id)
-    data = requests.get(url)
-    data = data.json()
-    poster_path = data['poster_path']
-    full_path = "https://image.tmdb.org/t/p/w500/" + poster_path
-    return full_path
+def get_poster_url(movie_id):
+    """Return the poster URL template for frontend to fetch"""
+    return f"https://api.themoviedb.org/3/movie/{movie_id}?api_key=a27a49bf043d4a93c59dccc8ffde1312&language=en-US"
 
 def recommend(movie):
-    
+    try:
+        # Get movie index by title
+        movie_index = dt.get_movie_index_by_title(movie)
+        if movie_index is None:
+            print(f"Movie '{movie}' not found")
+            return []
         
-    movies = pd.read_csv('pkl/movie_list.csv')
-    movies.drop('Unnamed: 0',axis=1,inplace=True)
+        # Get similarity matrix
+        similarity = dt.similar()
         
-    
-    similarity = dt.similar()
-    index = movies[movies['title'] == movie].index[0]
-    distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
-    
-    recommended_movie=[]
-
-    for i in distances[0:6]:
-        # fetch the movie poster
-        movie_id = movies.iloc[i[0]].movie_id
-
-        movie_name=movies.iloc[i[0]].title
+        if similarity.size == 0 or movie_index >= len(similarity):
+            print(f"Invalid similarity matrix or movie index: {movie_index}")
+            return []
+        
+        # Get similarity scores for the movie
         try:
-            movie_poster=fetch_poster(movie_id)
-          
-        except:
-            movie_poster="image not found"
-    
-        finally:
-            movies_overviews=fetch_overview(movie_id)
-            recommended_movie.append((movie_name,movies_overviews,movie_poster))
+            movie_similarities = similarity[movie_index]
+            distances = sorted(list(enumerate(movie_similarities)), reverse=True, key=lambda x: x[1])
+        except IndexError as e:
+            print(f"Index error in similarity matrix: {e}")
+            return []
         
-
-
-    return recommended_movie
+        recommended_movie = []
+        
+        # Limit to available movies and ensure we don't exceed bounds
+        max_recommendations = min(6, len(distances))
+        
+        for i in range(max_recommendations):
+            if i < len(distances):
+                movie_idx, score = distances[i]
+                # Get movie by index
+                movie_obj = dt.get_movie_by_index(movie_idx)
+                if movie_obj:
+                    movie_id = movie_obj.movie_id
+                    movie_name = movie_obj.title
+                    movies_overviews = fetch_overview(movie_id)
+                    
+                    # Return movie_id instead of poster URL for frontend to fetch
+                    recommended_movie.append({
+                        'title': movie_name,
+                        'overview': movies_overviews,
+                        'movie_id': movie_id
+                    })
+        
+        return recommended_movie
+    except Exception as e:
+        print(f"Error in recommend function: {e}")
+        return []
 
 @app.route("/")
 def home():
@@ -76,51 +79,107 @@ def home():
 
 @app.route('/gettext', methods=["POST"])
 def gettext():
-    movie=request.json['text_data']
-    
-    recommended_movie = recommend(movie.lower())
-    
-    
-    return jsonify(recommended_movie)
+    try:
+        movie = request.json['text_data']
+        
+        # Check if database has movies
+        from models import Movie
+        movie_count = Movie.query.count()
+        
+        if movie_count == 0:
+            return jsonify([{
+                'title': 'Database Empty',
+                'overview': 'Please run the database migration first: py migrate_to_db.py',
+                'movie_id': 0
+            }])
+        
+        recommended_movie = recommend(movie.lower())
+        
+        if not recommended_movie:
+            return jsonify([{
+                'title': 'No Recommendations',
+                'overview': f'No similar movies found for "{movie}"',
+                'movie_id': 0
+            }])
+        
+        return jsonify(recommended_movie)
+    except Exception as e:
+        print(f"Error in gettext: {e}")
+        return jsonify([{
+            'title': 'Error',
+            'overview': 'An error occurred while getting recommendations',
+            'movie_id': 0
+        }])
     
 
 @app.route('/update', methods=['POST'])
 def update():
-    obj = pd.read_csv('pkl/data.csv')
-    obj.drop('Unnamed: 0',axis=1,inplace=True)
-    df=obj
-
-#there are three paramether update_name,detail,old_name 
-#update name is new name of task
-#detail is new detail of task
-#old_name is to identify the data in database
-    update_name = request.json['user_input']
-    update_name=update_name.lower()
-    
-    datas=df[df['title'].str.match(update_name)].values
-
-    datas=datas.flatten()
-    print(datas)
-    ls=[]
-    for i in datas[0:6]:
-        ls.append(i)
-    
-    
-    return jsonify(ls)
+    try:
+        update_name = request.json['user_input']
+        update_name = update_name.lower()
+        
+        movies = DatabaseService.search_movies(update_name)
+        return jsonify(movies)
+    except Exception as e:
+        print(f"Error in update function: {e}")
+        return jsonify([])
 
 
 @app.route('/movies_data',methods=['GET'])
 def movies_data():
-    new=pd.read_csv('pkl/movies.csv')
-    new.drop('Unnamed: 0',axis=1,inplace=True)
-    df=new
-    
-    x=df.sample(12)
-    x['image']=x['movie_id'].apply(fetch_poster)
-    list=[]
-    for i in zip(x['title'],x['tags'],x['image']):
-        list.append(i)
-    return jsonify(list)
+    try:
+        # Check if database has movies
+        from models import Movie
+        movie_count = Movie.query.count()
+        
+        if movie_count == 0:
+            return jsonify([{
+                'title': 'Database Empty',
+                'tags': 'Please run migration: py migrate_to_db.py',
+                'movie_id': 0
+            }])
+        
+        random_movies = DatabaseService.get_random_movies(12)
+        
+        if not random_movies:
+            return jsonify([{
+                'title': 'No Movies Found',
+                'tags': 'Database appears to be empty',
+                'movie_id': 0
+            }])
+        
+        movie_list = []
+        for movie in random_movies:
+            movie_list.append({
+                'title': movie.title,
+                'tags': movie.tags or '',
+                'movie_id': movie.movie_id
+            })
+        
+        return jsonify(movie_list)
+    except Exception as e:
+        print(f"Error in movies_data function: {e}")
+        return jsonify([{
+            'title': 'Error',
+            'tags': f'Database error: {str(e)}',
+            'movie_id': 0
+        }])
+
+@app.route('/get_posters', methods=['POST'])
+def get_posters():
+    """Batch fetch poster URLs for multiple movies"""
+    try:
+        from poster_service import PosterService
+        movie_ids = request.json.get('movie_ids', [])
+        
+        if not movie_ids:
+            return jsonify({})
+        
+        posters = PosterService.get_multiple_posters(movie_ids)
+        return jsonify(posters)
+    except Exception as e:
+        print(f"Error in get_posters function: {e}")
+        return jsonify({})
     
 
 

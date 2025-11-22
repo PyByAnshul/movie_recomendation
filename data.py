@@ -1,28 +1,34 @@
-
-import pandas as pd 
-
-
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from database_service import DatabaseService
 
 def similar():
-    new=pd.read_csv('pkl/movies.csv')
-    new.drop('Unnamed: 0',axis=1,inplace=True)
+    """Get similarity matrix from database"""
+    return DatabaseService.get_similarity_matrix()
 
-   
+def get_movie_by_index(index):
+    """Get movie by index"""
+    try:
+        movies = DatabaseService.get_all_movies()
+        if not movies or not isinstance(index, int):
+            return None
+        
+        if 0 <= index < len(movies):
+            return movies[index]
+        return None
+    except Exception as e:
+        print(f"Error getting movie by index: {e}")
+        return None
 
-
-    cv = CountVectorizer(max_features=5000,stop_words='english')
-    vector = cv.fit_transform(new['tags']).toarray()
-    similarity = cosine_similarity(vector)
-    return similarity
-
-    
-   
-
-
-
-
-
-
-
+def get_movie_index_by_title(title):
+    """Get movie index by title"""
+    try:
+        movies = DatabaseService.get_all_movies()
+        if not movies:
+            return None
+        
+        for i, movie in enumerate(movies):
+            if movie.title and movie.title.lower().strip() == title.lower().strip():
+                return i
+        return None
+    except Exception as e:
+        print(f"Error getting movie index: {e}")
+        return None
